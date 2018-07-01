@@ -1,0 +1,6 @@
+[package]
+name = "ptx-parser"
+version = "0.1.0"
+authors = ["Bob Somers <bob@bobsomers.com>"]
+
+[dependencies]

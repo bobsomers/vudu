@@ -1,0 +1,7 @@
+[package]
+name = "vuducc"
+version = "0.1.0"
+authors = ["Bob Somers <bob@bobsomers.com>"]
+
+[dependencies]
+ptx-parser = { path = "../ptx-parser" }
