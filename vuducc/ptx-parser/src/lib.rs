@@ -2,7 +2,7 @@ extern crate comment_strip;
 #[macro_use]
 extern crate nom;
 
-use nom::{digit, is_space, multispace};
+use nom::{digit, is_alphabetic, is_space, multispace};
 use std::str;
 use std::str::FromStr;
 
@@ -41,6 +41,38 @@ pub struct ModuleDirectives {
     pub target: Target,
     pub address_size: u8,
 }
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Entry {
+    param_list: String,
+    kernel_body: String,
+}
+
+fn is_followsym(c: u8) -> bool {
+    (c >= 'a' as u8 && c <= 'z' as u8) ||
+        (c >= 'A' as u8 && c <= 'Z' as u8) ||
+        (c >= '0' as u8 && c <= '9' as u8) ||
+        (c == '_' as u8) || (c == '$' as u8)
+}
+
+fn is_ident_leader(c: u8) -> bool {
+    (c == '_' as u8) || (c == '$' as u8) || (c == '%' as u8)
+}
+
+named!(identifier(&[u8]) -> String,
+    alt!(
+        do_parse!(
+            leader: map_res!(take_while_m_n!(1, 1, is_alphabetic), str::from_utf8) >>
+            rest: map_res!(take_while!(is_followsym), str::from_utf8) >>
+            (leader.to_string() + rest)
+        ) |
+        do_parse!(
+            leader: map_res!(take_while_m_n!(1, 1, is_ident_leader), str::from_utf8) >>
+            rest: map_res!(take_while1!(is_followsym), str::from_utf8) >>
+            (leader.to_string() + rest)
+        )
+    )
+);
 
 named!(u8_literal(&[u8]) -> u8,
     map_res!(map_res!(digit, str::from_utf8), |s: &str| s.parse::<u8>())
@@ -98,6 +130,15 @@ named!(module_directives(&[u8]) -> ModuleDirectives,
         (ModuleDirectives { version, target, address_size })
     )
 );
+
+//named!(entry_directive(&[u8]) -> Entry,
+//    do_parse!(
+//        tag!(".entry") >>
+//        take_while!(is_space) >>
+//
+//        (...)
+//    )
+//);
 
 fn preprocess(input: &[u8]) -> String {
     let src = String::from_utf8(input.to_vec()).unwrap();
@@ -282,6 +323,91 @@ mod tests {
                     address_size: 32u8
                 }
             ))
+        );
+    }
+
+    #[test]
+    fn is_followsym_test() {
+        assert_eq!(is_followsym('a' as u8), true);
+        assert_eq!(is_followsym('z' as u8), true);
+        assert_eq!(is_followsym('A' as u8), true);
+        assert_eq!(is_followsym('Z' as u8), true);
+        assert_eq!(is_followsym('0' as u8), true);
+        assert_eq!(is_followsym('9' as u8), true);
+        assert_eq!(is_followsym('_' as u8), true);
+        assert_eq!(is_followsym('$' as u8), true);
+        assert_eq!(is_followsym(' ' as u8), false);
+    }
+
+    #[test]
+    fn is_ident_leader_test() {
+        assert_eq!(is_ident_leader('_' as u8), true);
+        assert_eq!(is_ident_leader('$' as u8), true);
+        assert_eq!(is_ident_leader('%' as u8), true);
+        assert_eq!(is_ident_leader(' ' as u8), false);
+    }
+
+    #[test]
+    fn identifier_test() {
+        assert_eq!(identifier(b"a "),
+            Ok((
+                &b" "[..],
+                String::from("a")
+            ))
+        );
+        assert_eq!(identifier(b"abc123 "),
+            Ok((
+                &b" "[..],
+                String::from("abc123")
+            ))
+        );
+        assert_eq!(identifier(b"X "),
+            Ok((
+                &b" "[..],
+                String::from("X")
+            ))
+        );
+        assert_eq!(identifier(b"XabcYZ_$123 "),
+            Ok((
+                &b" "[..],
+                String::from("XabcYZ_$123")
+            ))
+        );
+        assert_eq!(identifier(b"_a "),
+            Ok((
+                &b" "[..],
+                String::from("_a")
+            ))
+        );
+        assert_eq!(identifier(b"$$ "),
+            Ok((
+                &b" "[..],
+                String::from("$$")
+            ))
+        );
+        assert_eq!(identifier(b"%2 "),
+            Ok((
+                &b" "[..],
+                String::from("%2")
+            ))
+        );
+        assert_eq!(identifier(b"$ "),
+            Err(nom::Err::Error(error_position!(
+                &b"$ "[..],
+                nom::ErrorKind::Alt
+            )))
+        );
+        assert_eq!(identifier(b"123 "),
+            Err(nom::Err::Error(error_position!(
+                &b"123 "[..],
+                nom::ErrorKind::Alt
+            )))
+        );
+        assert_eq!(identifier(b"_ "),
+            Err(nom::Err::Error(error_position!(
+                &b"_ "[..],
+                nom::ErrorKind::Alt
+            )))
         );
     }
 
