@@ -1,105 +1,106 @@
 #[macro_use]
 extern crate nom;
 
-use nom::{is_digit, is_space};
+use nom::{digit, is_space, multispace, IResult};
 use std::str;
+use std::str::FromStr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Version {
-    major: u8,
-    minor: u8,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ParseTargetError {
+pub enum ParseError {
     UnknownTarget,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Target {
+pub struct Version {
+    pub major: u8,
+    pub minor: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Target {
     Sm30,
+    Sm70,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ParseAddressSizeError {
-    UnknownAddressSize,
-}
+impl FromStr for Target {
+    type Err = ParseError;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AddressSize {
-    Bit32,
-    Bit64,
+    fn from_str(target: &str) -> Result<Self, Self::Err> {
+        match target {
+            "sm_30" => Ok(Target::Sm30),
+            "sm_70" => Ok(Target::Sm70),
+            _ => Err(ParseError::UnknownTarget),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct Module {
-    version: Version,
-    target: Target,
-    address_size: AddressSize,
+pub struct ModuleDirectives {
+    pub version: Version,
+    pub target: Target,
+    pub address_size: u8,
 }
 
-fn u8_from_bytes(input: &[u8]) -> Result<u8, std::num::ParseIntError> {
-    u8::from_str_radix(str::from_utf8(input).unwrap(), 10)
-}
-
-fn target_from_bytes(input: &[u8]) -> Result<Target, ParseTargetError> {
-    let arch = str::from_utf8(input).unwrap();
-    match arch {
-        "sm_30" => Ok(Target::Sm30),
-        _ => Err(ParseTargetError::UnknownTarget),
-    }
-}
-
-fn address_size_from_bytes(input: &[u8]) -> Result<AddressSize, ParseAddressSizeError> {
-    let size = str::from_utf8(input).unwrap();
-    match size {
-        "32" => Ok(AddressSize::Bit32),
-        "64" => Ok(AddressSize::Bit64),
-        _ => Err(ParseAddressSizeError::UnknownAddressSize),
-    }
-}
-
-named!(line_comment,
-    delimited!(
-        tag!("//"),
-        take_until!("\n"),
-        tag!("\n")
-    )
+named!(u8_literal(&[u8]) -> u8,
+    map_res!(map_res!(digit, str::from_utf8), |s: &str| s.parse::<u8>())
 );
 
-named!(version_directive<&[u8], Version>,
+named!(version_directive(&[u8]) -> Version,
     do_parse!(
         tag!(".version") >>
         take_while!(is_space) >>
-        major: map_res!(take_while!(is_digit), u8_from_bytes) >>
+        major: u8_literal >>
         char!('.') >>
-        minor: map_res!(take_while!(is_digit), u8_from_bytes) >>
-        tag!("\n") >>
+        minor: u8_literal >>
         (Version { major, minor: minor })
     )
 );
 
-named!(target_directive<&[u8], Target>,
+named!(target_literal(&[u8]) -> Target,
+    map_res!(
+        map_res!(
+            alt!(tag!("sm_30")
+                | tag!("sm_70")
+            ),
+            str::from_utf8
+        ),
+        |s: &str| s.parse::<Target>()
+    )
+);
+
+named!(target_directive(&[u8]) -> Target,
     do_parse!(
         tag!(".target") >>
         take_while!(is_space) >>
-        // TODO: Extend this to support multiple architectures and platform
-        //       options
-        target: map_res!(tag!("sm_30"), target_from_bytes) >>
-        tag!("\n") >>
+        // TODO: Extend this to support debug and platform options
+        target: target_literal >>
         (target)
     )
 );
 
-named!(address_size_directive<&[u8], AddressSize>,
+named!(address_size_directive(&[u8]) -> u8,
     do_parse!(
         tag!(".address_size") >>
         take_while!(is_space) >>
-        address_size: map_res!(alt!(tag!("32") | tag!("64")), address_size_from_bytes) >>
-        tag!("\n") >>
+        address_size: map_res!(map_res!(alt!(tag!("32") | tag!("64")),
+                                        str::from_utf8),
+                               |s: &str| s.parse::<u8>()) >>
         (address_size)
     )
 );
+
+named!(module_directives(&[u8]) -> ModuleDirectives,
+    do_parse!(
+        version: terminated!(version_directive, multispace) >>
+        target: terminated!(target_directive, multispace) >>
+        address_size: address_size_directive >>
+        (ModuleDirectives { version, target, address_size })
+    )
+);
+
+pub fn parse_bytes(input: &[u8]) -> IResult<&[u8], ModuleDirectives> {
+    module_directives(input)
+}
 
 #[cfg(test)]
 mod tests {
@@ -108,51 +109,165 @@ mod tests {
     use nom::Needed;
 
     #[test]
-    fn line_comment_test() {
-        assert_eq!(line_comment(b"// foo bar\nbaz"),
-                   Ok((&b"baz"[..], &b" foo bar"[..])));
-        assert_eq!(line_comment(b"// foo bar"),
-                   Err(Incomplete(Needed::Size(1))));
+    fn target_from_str_test() {
+        assert_eq!(Target::from_str("sm_30"),
+                   Ok(Target::Sm30));
+        assert_eq!(Target::from_str("foobar"),
+                   Err(ParseError::UnknownTarget));
+    }
+
+    #[test]
+    fn u8_literal_test() {
+        assert_eq!(u8_literal(b"42 "),
+            Ok((
+                &b" "[..],
+                42
+            ))
+        );
+        assert_eq!(u8_literal(b"foo"),
+            Err(nom::Err::Error(error_position!(
+                &b"foo"[..],
+                nom::ErrorKind::Digit
+            )))
+        );
     }
 
     #[test]
     fn version_directive_test() {
-        assert_eq!(version_directive(b".version 6.0\nfoo"),
-                   Ok((&b"foo"[..], Version { major: 6, minor: 0 })));
-        assert_eq!(version_directive(b".version 12.42\n"),
-                   Ok((&b""[..], Version { major: 12, minor: 42 })));
-        assert_eq!(version_directive(b".version 6\n"),
-                   Err(nom::Err::Error(error_position!(&b"\n"[..],
-                                                       nom::ErrorKind::Char))));
-        assert_eq!(version_directive(b".version 6.\n"),
-                   Err(nom::Err::Error(error_position!(&b"\n"[..],
-                                                       nom::ErrorKind::MapRes))));
-        assert_eq!(version_directive(b".version a.b\n"),
-                   Err(nom::Err::Error(error_position!(&b"a.b\n"[..],
-                                                       nom::ErrorKind::MapRes))));
-        assert_eq!(version_directive(b".version 6.b\n"),
-                   Err(nom::Err::Error(error_position!(&b"b\n"[..],
-                                                       nom::ErrorKind::MapRes))));
+        assert_eq!(version_directive(b".version 6.0 "),
+            Ok((
+                &b" "[..],
+                Version { major: 6, minor: 0 }
+            ))
+        );
+        assert_eq!(version_directive(b".version 12.42 "),
+            Ok((
+                &b" "[..],
+                Version { major: 12, minor: 42 }
+            ))
+        );
+        assert_eq!(version_directive(b".version 6 "),
+            Err(nom::Err::Error(error_position!(
+                &b" "[..],
+                nom::ErrorKind::Char
+            )))
+        );
+        assert_eq!(version_directive(b".version 6. "),
+            Err(nom::Err::Error(error_position!(
+                &b" "[..],
+                nom::ErrorKind::Digit
+            )))
+        );
+        assert_eq!(version_directive(b".version a.b"),
+            Err(nom::Err::Error(error_position!(
+                &b"a.b"[..],
+                nom::ErrorKind::Digit
+            )))
+        );
+        assert_eq!(version_directive(b".version 6.a"),
+            Err(nom::Err::Error(error_position!(
+                &b"a"[..],
+                nom::ErrorKind::Digit
+            )))
+        );
+    }
+
+    #[test]
+    fn target_literal_test() {
+        assert_eq!(target_literal(b"sm_30"),
+            Ok((
+                &b""[..],
+                Target::Sm30
+            ))
+        );
+        assert_eq!(target_literal(b"sm_70"),
+            Ok((
+                &b""[..],
+                Target::Sm70
+            ))
+        );
+        assert_eq!(target_literal(b"sm_80"),
+            Err(nom::Err::Error(error_position!(
+                &b"sm_80"[..],
+                nom::ErrorKind::Alt
+            )))
+        );
     }
 
     #[test]
     fn target_directive_test() {
-        assert_eq!(target_directive(b".target sm_30\nfoo"),
-                   Ok((&b"foo"[..], Target::Sm30)));
-        assert_eq!(target_directive(b".target sm_60\n"),
-                   Err(nom::Err::Error(error_position!(&b"sm_60\n"[..],
-                                                       nom::ErrorKind::Tag))));
-                                                    
+        assert_eq!(target_directive(b".target sm_30 "),
+            Ok((
+                &b" "[..],
+                Target::Sm30
+            ))
+        );
+        assert_eq!(target_directive(b".target sm_70 "),
+            Ok((
+                &b" "[..],
+                Target::Sm70
+            ))
+        );
+        assert_eq!(target_directive(b".target foobar"),
+            Err(nom::Err::Error(error_position!(
+                &b"foobar"[..],
+                nom::ErrorKind::Alt
+            )))
+        );
     }
 
     #[test]
     fn address_size_directive_test() {
-        assert_eq!(address_size_directive(b".address_size 32\nfoo"),
-                   Ok((&b"foo"[..], AddressSize::Bit32)));
-        assert_eq!(address_size_directive(b".address_size 64\n"),
-                   Ok((&b""[..], AddressSize::Bit64)));
-        assert_eq!(address_size_directive(b".address_size foo\n"),
-                   Err(nom::Err::Error(error_position!(&b"foo\n"[..],
-                                                       nom::ErrorKind::Alt))));
+        assert_eq!(address_size_directive(b".address_size 32 "),
+            Ok((
+                &b" "[..],
+                32u8
+            ))
+        );
+        assert_eq!(address_size_directive(b".address_size 64 "),
+            Ok((
+                &b" "[..],
+                64u8
+            ))
+        );
+        assert_eq!(address_size_directive(b".address_size 128"),
+            Err(nom::Err::Error(error_position!(
+                &b"128"[..],
+                nom::ErrorKind::Alt
+            )))
+        );
+        assert_eq!(address_size_directive(b".address_size foo"),
+            Err(nom::Err::Error(error_position!(
+                &b"foo"[..],
+                nom::ErrorKind::Alt
+            )))
+        );
+    }
+
+    #[test]
+    fn module_directives_test() {
+        let src = include_bytes!("test_ptx/module_directives_test_1.ptx");
+        assert_eq!(module_directives(src),
+            Ok((
+                &b"\n"[..],
+                ModuleDirectives {
+                    version: Version { major: 6, minor: 0 },
+                    target: Target::Sm30,
+                    address_size: 64u8
+                }
+            ))
+        );
+
+        //let src = include_bytes!("test_ptx/module_directives_test_2.ptx");
+        //assert_eq!(module_directives(src),
+        //    Ok((
+        //        &b"\n"[..],
+        //        ModuleDirectives {
+        //            version: Version { major: 6, minor: 2 },
+        //            target: Target::Sm70,
+        //            address_size: 32u8
+        //        }
+        //    ))
+        //);
     }
 }
