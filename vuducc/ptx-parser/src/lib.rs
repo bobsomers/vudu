@@ -1,7 +1,8 @@
+extern crate comment_strip;
 #[macro_use]
 extern crate nom;
 
-use nom::{digit, is_space, multispace, IResult};
+use nom::{digit, is_space, multispace};
 use std::str;
 use std::str::FromStr;
 
@@ -98,15 +99,28 @@ named!(module_directives(&[u8]) -> ModuleDirectives,
     )
 );
 
-pub fn parse_bytes(input: &[u8]) -> IResult<&[u8], ModuleDirectives> {
-    module_directives(input)
+fn preprocess(input: &[u8]) -> String {
+    let src = String::from_utf8(input.to_vec()).unwrap();
+    let clean = comment_strip::strip_comments(src,
+                                              comment_strip::CommentStyle::C,
+                                              true).unwrap();
+    let mut nonempty = clean.lines()
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                        .collect::<Vec<&str>>()
+                        .join("\n");
+    nonempty.push('\n');
+    nonempty
+}
+
+pub fn parse(input: &[u8]) -> ModuleDirectives {
+    // TODO: parser error handling, comment stripping error handling, etc.
+    module_directives(preprocess(input).as_bytes()).unwrap().1
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nom::Err::Incomplete;
-    use nom::Needed;
 
     #[test]
     fn target_from_str_test() {
@@ -246,7 +260,7 @@ mod tests {
 
     #[test]
     fn module_directives_test() {
-        let src = include_bytes!("test_ptx/module_directives_test_1.ptx");
+        let src = include_bytes!("test_ptx/module_directives_test.ptx");
         assert_eq!(module_directives(src),
             Ok((
                 &b"\n"[..],
@@ -258,16 +272,22 @@ mod tests {
             ))
         );
 
-        //let src = include_bytes!("test_ptx/module_directives_test_2.ptx");
-        //assert_eq!(module_directives(src),
-        //    Ok((
-        //        &b"\n"[..],
-        //        ModuleDirectives {
-        //            version: Version { major: 6, minor: 2 },
-        //            target: Target::Sm70,
-        //            address_size: 32u8
-        //        }
-        //    ))
-        //);
+        let src = preprocess(include_bytes!("test_ptx/messy_source.ptx"));
+        assert_eq!(module_directives(src.as_bytes()),
+            Ok((
+                &b"\n"[..],
+                ModuleDirectives {
+                    version: Version { major: 6, minor: 2 },
+                    target: Target::Sm70,
+                    address_size: 32u8
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn preprocess_test() {
+        let src = preprocess(include_bytes!("test_ptx/messy_source.ptx"));
+        assert_eq!(src, ".version 6.2\n.target sm_70\n.address_size 32\n");
     }
 }

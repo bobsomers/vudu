@@ -1,0 +1,11 @@
+
+// This is a comment
+  // This is another one
+// The next line is blank
+
+.version 6.2
+
+  // Surprise comment!
+
+.target sm_70 // Comment after a valid line!
+.address_size 32
