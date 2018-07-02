@@ -51,7 +51,7 @@ pub struct Entry {
 }
 
 impl Entry {
-    fn new(name: String, param_list: String, kernel_body: String) -> Entry {
+    fn new(name: String, param_list: String, kernel_body: String) -> Self {
         Entry {
             name: name,
             param_list: param_list,
@@ -59,6 +59,17 @@ impl Entry {
             visible: false,
         }
     }
+
+    fn set_visible(mut self) -> Self {
+        self.visible = true;
+        self
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Module {
+    pub directives: ModuleDirectives,
+    pub entry: Entry,
 }
 
 fn is_followsym(c: u8) -> bool {
@@ -161,6 +172,24 @@ named!(entry_directive(&[u8]) -> Entry,
         kernel_body: map_res!(is_not!("}"), str::from_utf8) >>
         char!('}') >>
         (Entry::new(name, param_list.to_owned(), kernel_body.to_owned()))
+    )
+);
+
+named!(visible_directive(&[u8]) -> Entry,
+    do_parse!(
+        tag!(".visible") >>
+        take_while!(is_space) >>
+        entry: entry_directive >>
+        (entry.set_visible())
+    )
+);
+
+named!(module(&[u8]) -> Module,
+    do_parse!(
+        directives: module_directives >>
+        multispace >>
+        entry: visible_directive >>
+        (Module { directives, entry })
     )
 );
 
@@ -440,9 +469,49 @@ mod tests {
         assert_eq!(entry_directive(b".entry abc123(x, y, z) { body body } "),
             Ok((
                 &b" "[..],
-                Entry::new(String::from("abc123"),
-                           String::from("x, y, z"),
-                           String::from("body body "))
+                Entry {
+                    name: String::from("abc123"),
+                    param_list: String::from("x, y, z"),
+                    kernel_body: String::from("body body "),
+                    visible: false,
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn visible_directive_test() {
+        assert_eq!(visible_directive(b".visible .entry abc123(x, y, z) { body body } "),
+            Ok((
+                &b" "[..],
+                Entry {
+                    name: String::from("abc123"),
+                    param_list: String::from("x, y, z"),
+                    kernel_body: String::from("body body "),
+                    visible: true,
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn module_test() {
+        assert_eq!(module(include_bytes!("test_ptx/simple_module.ptx")),
+            Ok((
+                &b"\n"[..],
+                Module {
+                    directives: ModuleDirectives {
+                        version: Version { major: 6, minor: 0 },
+                        target: Target::Sm30,
+                        address_size: 64u8,
+                    },
+                    entry: Entry {
+                        name: String::from("abc123"),
+                        param_list: String::from("x, y, z"),
+                        kernel_body: String::from("body body "),
+                        visible: true,
+                    },
+                }
             ))
         );
     }

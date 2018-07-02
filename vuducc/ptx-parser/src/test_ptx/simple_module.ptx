@@ -1,0 +1,4 @@
+.version 6.0
+.target sm_30
+.address_size 64
+.visible .entry abc123(x, y, z) { body body }
