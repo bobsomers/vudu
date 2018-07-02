@@ -10,5 +10,5 @@ An implementation of CUDA on top of the Vulkan Compute API.
    steps:
     * Generate PTX assembly for device code by invoking `nvcc`.
     * Split host code out and rewrite kernel invocation syntax `foo<<<...>>>()`.
-    * Transpile PTX assembly into a SPIR-V compute code.
+    * Transpile PTX assembly into SPIR-V compute code.
     * Generate kernel invocations which run the SPIR-V kernel using Vulkan.
