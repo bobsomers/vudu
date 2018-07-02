@@ -44,8 +44,21 @@ pub struct ModuleDirectives {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Entry {
-    param_list: String,
-    kernel_body: String,
+    pub name: String,
+    pub param_list: String,
+    pub kernel_body: String,
+    pub visible: bool,
+}
+
+impl Entry {
+    fn new(name: String, param_list: String, kernel_body: String) -> Entry {
+        Entry {
+            name: name,
+            param_list: param_list,
+            kernel_body: kernel_body,
+            visible: false,
+        }
+    }
 }
 
 fn is_followsym(c: u8) -> bool {
@@ -64,12 +77,12 @@ named!(identifier(&[u8]) -> String,
         do_parse!(
             leader: map_res!(take_while_m_n!(1, 1, is_alphabetic), str::from_utf8) >>
             rest: map_res!(take_while!(is_followsym), str::from_utf8) >>
-            (leader.to_string() + rest)
+            (leader.to_owned() + rest)
         ) |
         do_parse!(
             leader: map_res!(take_while_m_n!(1, 1, is_ident_leader), str::from_utf8) >>
             rest: map_res!(take_while1!(is_followsym), str::from_utf8) >>
-            (leader.to_string() + rest)
+            (leader.to_owned() + rest)
         )
     )
 );
@@ -131,14 +144,25 @@ named!(module_directives(&[u8]) -> ModuleDirectives,
     )
 );
 
-//named!(entry_directive(&[u8]) -> Entry,
-//    do_parse!(
-//        tag!(".entry") >>
-//        take_while!(is_space) >>
-//
-//        (...)
-//    )
-//);
+named!(entry_directive(&[u8]) -> Entry,
+    do_parse!(
+        tag!(".entry") >>
+        take_while!(is_space) >>
+        name: identifier >>
+        take_while!(is_space) >>
+        char!('(') >>
+        take_while!(is_space) >>
+        param_list: map_res!(is_not!(")"), str::from_utf8) >>
+        take_while!(is_space) >>
+        char!(')') >>
+        take_while!(is_space) >>
+        char!('{') >>
+        take_while!(is_space) >>
+        kernel_body: map_res!(is_not!("}"), str::from_utf8) >>
+        char!('}') >>
+        (Entry::new(name, param_list.to_owned(), kernel_body.to_owned()))
+    )
+);
 
 fn preprocess(input: &[u8]) -> String {
     let src = String::from_utf8(input.to_vec()).unwrap();
@@ -408,6 +432,18 @@ mod tests {
                 &b"_ "[..],
                 nom::ErrorKind::Alt
             )))
+        );
+    }
+
+    #[test]
+    fn entry_directive_test() {
+        assert_eq!(entry_directive(b".entry abc123(x, y, z) { body body } "),
+            Ok((
+                &b" "[..],
+                Entry::new(String::from("abc123"),
+                           String::from("x, y, z"),
+                           String::from("body body "))
+            ))
         );
     }
 
