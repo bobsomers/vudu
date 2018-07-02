@@ -5,3 +5,4 @@ authors = ["Bob Somers <bob@bobsomers.com>"]
 
 [dependencies]
 ptx-parser = { path = "../ptx-parser" }
+rspirv = "0.5.2"
