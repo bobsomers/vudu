@@ -2,7 +2,7 @@ extern crate comment_strip;
 #[macro_use]
 extern crate nom;
 
-use nom::{digit, is_alphabetic, is_space, multispace};
+use nom::{digit, is_alphabetic, multispace};
 use std::str;
 use std::str::FromStr;
 
@@ -105,7 +105,7 @@ named!(u8_literal(&[u8]) -> u8,
 named!(version_directive(&[u8]) -> Version,
     do_parse!(
         tag!(".version") >>
-        take_while!(is_space) >>
+        multispace >>
         major: u8_literal >>
         char!('.') >>
         minor: u8_literal >>
@@ -128,7 +128,7 @@ named!(target_literal(&[u8]) -> Target,
 named!(target_directive(&[u8]) -> Target,
     do_parse!(
         tag!(".target") >>
-        take_while!(is_space) >>
+        multispace >>
         // TODO: Extend this to support debug and platform options
         target: target_literal >>
         (target)
@@ -138,7 +138,7 @@ named!(target_directive(&[u8]) -> Target,
 named!(address_size_directive(&[u8]) -> u8,
     do_parse!(
         tag!(".address_size") >>
-        take_while!(is_space) >>
+        multispace >>
         address_size: map_res!(map_res!(alt!(tag!("32") | tag!("64")),
                                         str::from_utf8),
                                |s: &str| s.parse::<u8>()) >>
@@ -158,17 +158,16 @@ named!(module_directives(&[u8]) -> ModuleDirectives,
 named!(entry_directive(&[u8]) -> Entry,
     do_parse!(
         tag!(".entry") >>
-        take_while!(is_space) >>
+        multispace >>
         name: identifier >>
-        take_while!(is_space) >>
+        opt!(multispace) >>
         char!('(') >>
-        take_while!(is_space) >>
+        opt!(multispace) >>
         param_list: map_res!(is_not!(")"), str::from_utf8) >>
-        take_while!(is_space) >>
         char!(')') >>
-        take_while!(is_space) >>
+        opt!(multispace) >>
         char!('{') >>
-        take_while!(is_space) >>
+        opt!(multispace) >>
         kernel_body: map_res!(is_not!("}"), str::from_utf8) >>
         char!('}') >>
         (Entry::new(name, param_list.to_owned(), kernel_body.to_owned()))
@@ -178,7 +177,7 @@ named!(entry_directive(&[u8]) -> Entry,
 named!(visible_directive(&[u8]) -> Entry,
     do_parse!(
         tag!(".visible") >>
-        take_while!(is_space) >>
+        multispace >>
         entry: entry_directive >>
         (entry.set_visible())
     )
@@ -193,7 +192,7 @@ named!(module(&[u8]) -> Module,
     )
 );
 
-fn preprocess(input: &[u8]) -> String {
+pub fn preprocess(input: &[u8]) -> String {
     let src = String::from_utf8(input.to_vec()).unwrap();
     let clean = comment_strip::strip_comments(src,
                                               comment_strip::CommentStyle::C,
@@ -207,9 +206,9 @@ fn preprocess(input: &[u8]) -> String {
     nonempty
 }
 
-pub fn parse(input: &[u8]) -> ModuleDirectives {
+pub fn parse(input: &[u8]) -> Module {
     // TODO: parser error handling, comment stripping error handling, etc.
-    module_directives(preprocess(input).as_bytes()).unwrap().1
+    module(preprocess(input).as_bytes()).unwrap().1
 }
 
 #[cfg(test)]
