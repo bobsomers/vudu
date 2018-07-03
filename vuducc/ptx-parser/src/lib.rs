@@ -9,6 +9,7 @@ use std::str::FromStr;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParseError {
     UnknownTarget,
+    UnknownVariableType,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,16 +43,66 @@ pub struct ModuleDirectives {
     pub address_size: u8,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VariableType {
+    S8,
+    S16,
+    S32,
+    S64,
+    U8,
+    U16,
+    U32,
+    U64,
+    F16,
+    F32,
+    F64,
+    B8,
+    B16,
+    B32,
+    B64,
+}
+
+impl FromStr for VariableType {
+    type Err = ParseError;
+
+    fn from_str(target: &str) -> Result<Self, Self::Err> {
+        match target {
+            ".s8" => Ok(VariableType::S8),
+            ".s16" => Ok(VariableType::S16),
+            ".s32" => Ok(VariableType::S32),
+            ".s64" => Ok(VariableType::S64),
+            ".u8" => Ok(VariableType::U8),
+            ".u16" => Ok(VariableType::U16),
+            ".u32" => Ok(VariableType::U32),
+            ".u64" => Ok(VariableType::U64),
+            ".f16" => Ok(VariableType::F16),
+            ".f32" => Ok(VariableType::F32),
+            ".f64" => Ok(VariableType::F64),
+            ".b8" => Ok(VariableType::B8),
+            ".b16" => Ok(VariableType::B16),
+            ".b32" => Ok(VariableType::B32),
+            ".b64" => Ok(VariableType::B64),
+            _ => Err(ParseError::UnknownVariableType),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Param {
+    pub var_type: VariableType,
+    pub name: String,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct Entry {
     pub name: String,
-    pub param_list: String,
+    pub param_list: Vec<Param>,
     pub kernel_body: String,
     pub visible: bool,
 }
 
 impl Entry {
-    fn new(name: String, param_list: String, kernel_body: String) -> Self {
+    fn new(name: String, param_list: Vec<Param>, kernel_body: String) -> Self {
         Entry {
             name: name,
             param_list: param_list,
@@ -155,6 +206,37 @@ named!(module_directives(&[u8]) -> ModuleDirectives,
     )
 );
 
+named!(variable_type_literal(&[u8]) -> VariableType,
+    map_res!(
+        map_res!(
+            alt!(tag!(".s8") | tag!(".s16") | tag!(".s32") | tag!(".s64") |
+                 tag!(".u8") | tag!(".u16") | tag!(".u32") | tag!(".u64") |
+                 tag!(".f16") |  tag!(".f32") | tag!(".f64") |
+                 tag!(".b8") | tag!(".b16") | tag!(".b32") | tag!(".b64")),
+            str::from_utf8
+        ),
+        |s: &str| s.parse::<VariableType>()
+    )
+);
+
+named!(param(&[u8]) -> Param,
+    do_parse!(
+        tag!(".param") >>
+        multispace >>
+        var_type: variable_type_literal >>
+        multispace >>
+        name: identifier >>
+        (Param { var_type, name })
+    )
+);
+
+named!(param_list(&[u8]) -> Vec<Param>,
+    separated_list!(
+        delimited!(opt!(multispace), tag!(","), opt!(multispace)),
+        param
+    )
+);
+
 named!(entry_directive(&[u8]) -> Entry,
     do_parse!(
         tag!(".entry") >>
@@ -163,14 +245,15 @@ named!(entry_directive(&[u8]) -> Entry,
         opt!(multispace) >>
         char!('(') >>
         opt!(multispace) >>
-        param_list: map_res!(is_not!(")"), str::from_utf8) >>
+        param_list: param_list >>
+        opt!(multispace) >>
         char!(')') >>
         opt!(multispace) >>
         char!('{') >>
         opt!(multispace) >>
         kernel_body: map_res!(is_not!("}"), str::from_utf8) >>
         char!('}') >>
-        (Entry::new(name, param_list.to_owned(), kernel_body.to_owned()))
+        (Entry::new(name, param_list, kernel_body.to_owned()))
     )
 );
 
@@ -208,7 +291,13 @@ pub fn preprocess(input: &[u8]) -> String {
 
 pub fn parse(input: &[u8]) -> Module {
     // TODO: parser error handling, comment stripping error handling, etc.
-    module(preprocess(input).as_bytes()).unwrap().1
+    let clean = preprocess(input);
+    let result = module(clean.as_bytes());
+    //match result.err().unwrap() {
+    //    nom::Err::Error(nom::simple_errors::Context::Code(c, _)) => println!("{:?}", str::from_utf8(c)),
+    //    _ => panic!("crap"),
+    //};
+    result.unwrap().1
 }
 
 #[cfg(test)]
@@ -464,13 +553,76 @@ mod tests {
     }
 
     #[test]
+    fn variable_type_literal_test() {
+        assert_eq!(variable_type_literal(b".u32"),
+            Ok((
+                &b""[..],
+                VariableType::U32
+            ))
+        );
+        assert_eq!(variable_type_literal(b".u64"),
+            Ok((
+                &b""[..],
+                VariableType::U64
+            ))
+        );
+        assert_eq!(variable_type_literal(b".f32"),
+            Ok((
+                &b""[..],
+                VariableType::F32
+            ))
+        );
+        assert_eq!(variable_type_literal(b".z32"),
+            Err(nom::Err::Error(error_position!(
+                &b".z32"[..],
+                nom::ErrorKind::Alt
+            )))
+        );
+    }
+
+    #[test]
+    fn param_test() {
+        assert_eq!(param(b".param .u32 abc123,"),
+            Ok((
+                &b","[..],
+                Param {
+                    var_type: VariableType::U32,
+                    name: String::from("abc123"),
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn param_list_test() {
+        assert_eq!(param_list(b".param .u32 abc123, .param .f64 xyz789)"),
+            Ok((
+                &b")"[..],
+                vec!(
+                    Param {
+                        var_type: VariableType::U32,
+                        name: String::from("abc123"),
+                    },
+                    Param {
+                        var_type: VariableType::F64,
+                        name: String::from("xyz789"),
+                    }
+                )
+            ))
+        );
+    }
+
+    #[test]
     fn entry_directive_test() {
-        assert_eq!(entry_directive(b".entry abc123(x, y, z) { body body } "),
+        assert_eq!(entry_directive(b".entry abc123(.param .u32 abc123) { body body } "),
             Ok((
                 &b" "[..],
                 Entry {
                     name: String::from("abc123"),
-                    param_list: String::from("x, y, z"),
+                    param_list: vec!(Param {
+                        var_type: VariableType::U32,
+                        name: String::from("abc123"),
+                    }),
                     kernel_body: String::from("body body "),
                     visible: false,
                 }
@@ -480,12 +632,15 @@ mod tests {
 
     #[test]
     fn visible_directive_test() {
-        assert_eq!(visible_directive(b".visible .entry abc123(x, y, z) { body body } "),
+        assert_eq!(visible_directive(b".visible .entry abc123(.param .u32 abc123) { body body } "),
             Ok((
                 &b" "[..],
                 Entry {
                     name: String::from("abc123"),
-                    param_list: String::from("x, y, z"),
+                    param_list: vec!(Param {
+                        var_type: VariableType::U32,
+                        name: String::from("abc123"),
+                    }),
                     kernel_body: String::from("body body "),
                     visible: true,
                 }
@@ -506,7 +661,10 @@ mod tests {
                     },
                     entry: Entry {
                         name: String::from("abc123"),
-                        param_list: String::from("x, y, z"),
+                        param_list: vec!(Param {
+                            var_type: VariableType::U32,
+                            name: String::from("abc123"),
+                        }),
                         kernel_body: String::from("body body "),
                         visible: true,
                     },
