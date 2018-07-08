@@ -1,6 +1,6 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -Werror -std=c99 -g -fPIC
-LFLAGS = -shared -fPIC
+LFLAGS = -shared -fPIC -lvulkan
 OBJS = vudu.o
 TARGET = vudurt.so
 
