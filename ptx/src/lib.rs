@@ -1,3 +1,9 @@
+mod lexer;
+
+pub fn parse(src: &str) {
+    let _tokens = lexer::lex(src);
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
