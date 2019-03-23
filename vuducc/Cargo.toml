@@ -1,5 +1,8 @@
-[workspace]
-members = [
-  "ptx-parser",
-  "vuducc",
-]
+[package]
+name = "vuducc"
+version = "0.1.0"
+authors = ["Bob Somers <bob@bobsomers.com>"]
+edition = "2018"
+
+[dependencies]
+ptx = { path = "../ptx" }

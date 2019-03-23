@@ -1,0 +1,15 @@
+[[package]]
+name = "ptx"
+version = "0.1.0"
+
+[[package]]
+name = "vuducc"
+version = "0.1.0"
+dependencies = [
+ "ptx 0.1.0",
+]
+
+[[package]]
+name = "vudurt"
+version = "0.1.0"
+
