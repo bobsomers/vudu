@@ -5,8 +5,11 @@
 #include <vulkan/vulkan.h>
 
 static VkInstance vudu_instance;
+static int vudu_instance_valid = 0;
+static VkPhysicalDevice vudu_device;
+static int vudu_device_valid = 0;
 
-static void __attribute__((constructor)) vuduCreate() {
+static int vudu__CreateInstance() {
   VkApplicationInfo ai;
   ai.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
   ai.pNext = NULL;
@@ -28,9 +31,14 @@ static void __attribute__((constructor)) vuduCreate() {
 
   VkResult result = vkCreateInstance(&ci, NULL, &vudu_instance);
   if (result != VK_SUCCESS) {
-    vudu_instance = NULL;
-    return;
+    return 0;
   }
+  return 1;
+}
+
+static void __attribute__((constructor)) vuduCreate() {
+  vudu_instance_valid = vudu__CreateInstance();
+
   printf("Created Vulkan instance!\n");
 }
 

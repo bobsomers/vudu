@@ -1,0 +1,9 @@
+module
+ | module_directives
+ | module_body
+ 
+module_directives
+ | line_comment
+ | version_directive
+ | target_directive
+ | address_size_directive
